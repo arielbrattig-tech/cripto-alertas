@@ -74,7 +74,7 @@ def save_state(state):
 
 
 def level_for(pct):
-    """+7.3% -> 1, -11% -> -2, +3% -> 0."""
+    """Com degrau de 10%: +13% -> 1, -21% -> -2, +7% -> 0."""
     steps = int(abs(pct) // THRESHOLD_PCT)
     return steps if pct >= 0 else -steps
 
