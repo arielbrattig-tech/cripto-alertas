@@ -13,7 +13,7 @@ import sys
 import time
 import urllib.parse
 import urllib.request
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 
 # ===== Configuração =====
@@ -21,7 +21,6 @@ SYMBOLS = ["DOTUSDT", "NEARUSDT", "ATOMUSDT", "SUIUSDT", "ONDOUSDT"]  # adicione
 THRESHOLD_PCT = 10.0    # tamanho de cada degrau de alerta
 REARM_PCT = 8.0         # volta abaixo disso (em módulo) = rearma
 STATE_FILE = Path(__file__).parent / "state.json"
-BRT = timezone(timedelta(hours=-3))  # horário de Brasília
 
 PRICE_SOURCES = [
     # Binance Futures (perpétuo). Bloqueia IPs dos EUA (servidores do GitHub), por isso há fallback.
@@ -100,34 +99,22 @@ def fmt_pct(pct):
     return ("+" if pct >= 0 else "") + fmt_num(pct, 2) + "%"
 
 
-def build_message(symbol, price, pct, btc, teste=False):
+def build_message(symbol, price, pct, btc):
     coin = symbol.replace("USDT", "")
-    if pct >= 0:
-        head, arrow, word = "🚀🟢", "📈", "SUBIU"
-    else:
-        head, arrow, word = "🔻🔴", "📉", "CAIU"
-    now = datetime.now(BRT).strftime("%d/%m %H:%M")
-
-    lines = []
-    if teste:
-        lines.append("🧪 _Mensagem de teste_")
-    lines += [
+    head, word = ("🚀🟢", "SUBIU") if pct >= 0 else ("🔻🔴", "CAIU")
+    lines = [
         f"{head} *{coin}/USDT {word} {fmt_pct(pct)}*",
-        "_variação nas últimas 24h_",
-        "",
+        "Variação nas últimas 24h",
         f"💵 Preço: *US$ {fmt_price(price)}*",
-        f"{arrow} Variação: *{fmt_pct(pct)}*",
     ]
     if btc:
         btc_price, btc_pct = btc
         btc_dot = "🟢" if btc_pct >= 0 else "🔴"
         lines += [
-            "",
             "━━━━━━━━━━━━━━",
-            "₿ *BTC/USD* (mesmo período)",
+            "*BTC/USD*",
             f"💵 US$ {fmt_price(btc_price)}  {btc_dot} {fmt_pct(btc_pct)}",
         ]
-    lines += ["", f"🕒 {now} (Brasília)"]
     return "\n".join(lines)
 
 
@@ -141,11 +128,11 @@ def fetch_btc():
 
 
 def main():
-    if os.environ.get("TESTE") == "true":
-        _, price, pct = fetch_ticker("NEARUSDT")
+    if os.environ.get("TESTE") == "true":  # dispara a mensagem de todas as moedas com dados reais
         btc = fetch_btc()
-        send_whatsapp(build_message("NEARUSDT", price, pct, btc, teste=True))
-        send_whatsapp(build_message("DOTUSDT", 1.2345, -12.34, btc, teste=True))
+        for symbol in SYMBOLS:
+            _, price, pct = fetch_ticker(symbol)
+            send_whatsapp(build_message(symbol, price, pct, btc))
         return
 
     state = load_state()
