@@ -1,10 +1,10 @@
 """Monitor de variação 24h de criptomoedas (Binance Futures) com alerta no WhatsApp via CallMeBot.
 
 Regras de alerta (por moeda):
-- Alerta quando a variação 24h cruza +5% ou -5%.
-- Alerta de novo a cada novo degrau de 5% (10%, 15%...) na mesma direção.
+- Alerta quando a variação 24h cruza +10% ou -10%.
+- Alerta de novo a cada novo degrau de 10% (20%, 30%...) na mesma direção.
 - Rearma quando a variação volta para dentro de ±REARM_PCT (evita alertas repetidos
-  quando o preço fica oscilando em torno de 5%).
+  quando o preço fica oscilando em torno de 10%).
 """
 
 import json
@@ -17,8 +17,8 @@ from pathlib import Path
 
 # ===== Configuração =====
 SYMBOLS = ["DOTUSDT", "NEARUSDT", "ATOMUSDT", "SUIUSDT", "ONDOUSDT"]  # adicione/remova moedas aqui
-THRESHOLD_PCT = 5.0     # tamanho de cada degrau de alerta
-REARM_PCT = 4.0         # volta abaixo disso (em módulo) = rearma
+THRESHOLD_PCT = 10.0    # tamanho de cada degrau de alerta
+REARM_PCT = 8.0         # volta abaixo disso (em módulo) = rearma
 STATE_FILE = Path(__file__).parent / "state.json"
 
 PRICE_SOURCES = [

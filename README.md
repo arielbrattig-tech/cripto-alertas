@@ -1,10 +1,10 @@
 # Cripto Alertas
 
 Monitora a variação de 24h de moedas na Binance Futures e envia alerta no WhatsApp (CallMeBot)
-quando passa de ±5% — e de novo a cada degrau de 5% (10%, 15%...). Roda no GitHub Actions a cada 5 min.
+quando passa de ±10% — e de novo a cada degrau de 10% (20%, 30%...). Roda no GitHub Actions a cada 5 min.
 
 ## Configurar o WhatsApp (CallMeBot)
-1. Pegue o número atual do bot em https://www.callmebot.com/blog/free-api-whatsapp-messages/ e adicione aos contatos.
+1. Abra https://wa.me/34623801190?text=I%20allow%20callmebot%20to%20send%20me%20messages (número atual do bot; confira em callmebot.com se mudar).
 2. Envie para ele por WhatsApp: `I allow callmebot to send me messages`
 3. Você receberá sua **API key**.
 4. No GitHub: *Settings → Secrets and variables → Actions → New repository secret*:
