@@ -4,6 +4,11 @@ on:
   schedule:
     - cron: "*/5 * * * *"   # a cada 5 min (o GitHub pode atrasar alguns minutos)
   workflow_dispatch:         # permite rodar manualmente pela aba Actions
+    inputs:
+      teste:
+        description: "Enviar mensagem de teste no WhatsApp"
+        type: boolean
+        default: false
 
 permissions:
   contents: write            # para salvar o state.json
@@ -27,6 +32,7 @@ jobs:
         env:
           CALLMEBOT_PHONE: ${{ secrets.CALLMEBOT_PHONE }}
           CALLMEBOT_APIKEY: ${{ secrets.CALLMEBOT_APIKEY }}
+          TESTE: ${{ inputs.teste }}
         run: python monitor.py
 
       - name: Salvar estado

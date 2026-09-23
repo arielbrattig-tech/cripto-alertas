@@ -80,6 +80,10 @@ def level_for(pct):
 
 
 def main():
+    if os.environ.get("TESTE") == "true":
+        send_whatsapp("🔻 TESTE -10.00% em 24h\nPreço: US$ 1,2345\nMonitor: DOT, NEAR, ATOM, SUI, ONDO")
+        return
+
     state = load_state()
     levels = state.setdefault("levels", {})
     failures = 0
