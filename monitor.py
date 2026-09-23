@@ -13,7 +13,7 @@ import sys
 import time
 import urllib.parse
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 # ===== Configuração =====
@@ -21,6 +21,7 @@ SYMBOLS = ["DOTUSDT", "NEARUSDT", "ATOMUSDT", "SUIUSDT", "ONDOUSDT"]  # adicione
 THRESHOLD_PCT = 10.0    # tamanho de cada degrau de alerta
 REARM_PCT = 8.0         # volta abaixo disso (em módulo) = rearma
 STATE_FILE = Path(__file__).parent / "state.json"
+BRT = timezone(timedelta(hours=-3))  # horário de Brasília
 
 PRICE_SOURCES = [
     # Binance Futures (perpétuo). Bloqueia IPs dos EUA (servidores do GitHub), por isso há fallback.
@@ -111,10 +112,13 @@ def build_message(symbol, price, pct, btc):
         btc_price, btc_pct = btc
         btc_dot = "🟢" if btc_pct >= 0 else "🔴"
         lines += [
+            "",
             "━━━━━━━━━━━━━━",
-            "*BTC/USD*",
+            "₿ *BTC/USD*",
             f"💵 US$ {fmt_price(btc_price)}  {btc_dot} {fmt_pct(btc_pct)}",
         ]
+    now = datetime.now(BRT).strftime("%d/%m %H:%M")
+    lines += ["", f"🕒 {now} (Brasília)"]
     return "\n".join(lines)
 
 
