@@ -10,9 +10,10 @@ Regras de alerta (por moeda):
 import json
 import os
 import sys
+import time
 import urllib.parse
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 # ===== Configuração =====
@@ -20,6 +21,7 @@ SYMBOLS = ["DOTUSDT", "NEARUSDT", "ATOMUSDT", "SUIUSDT", "ONDOUSDT"]  # adicione
 THRESHOLD_PCT = 10.0    # tamanho de cada degrau de alerta
 REARM_PCT = 8.0         # volta abaixo disso (em módulo) = rearma
 STATE_FILE = Path(__file__).parent / "state.json"
+BRT = timezone(timedelta(hours=-3))  # horário de Brasília
 
 PRICE_SOURCES = [
     # Binance Futures (perpétuo). Bloqueia IPs dos EUA (servidores do GitHub), por isso há fallback.
@@ -61,6 +63,7 @@ def send_whatsapp(text):
     if "error" in body.lower() and "queued" not in body.lower():
         raise RuntimeError(f"CallMeBot retornou erro: {body[:300]}")
     print("WhatsApp enviado.")
+    time.sleep(5)  # CallMeBot limita envios seguidos
 
 
 def load_state():
@@ -79,14 +82,76 @@ def level_for(pct):
     return steps if pct >= 0 else -steps
 
 
+def fmt_num(value, decimals):
+    """Formato brasileiro: 112345.6 -> '112.345,60'."""
+    s = f"{value:,.{decimals}f}"
+    return s.replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def fmt_price(price):
+    if price >= 1000:
+        return fmt_num(price, 0)
+    if price >= 10:
+        return fmt_num(price, 2)
+    return fmt_num(price, 4)
+
+
+def fmt_pct(pct):
+    return ("+" if pct >= 0 else "") + fmt_num(pct, 2) + "%"
+
+
+def build_message(symbol, price, pct, btc, teste=False):
+    coin = symbol.replace("USDT", "")
+    if pct >= 0:
+        head, arrow, word = "🚀🟢", "📈", "SUBIU"
+    else:
+        head, arrow, word = "🔻🔴", "📉", "CAIU"
+    now = datetime.now(BRT).strftime("%d/%m %H:%M")
+
+    lines = []
+    if teste:
+        lines.append("🧪 _Mensagem de teste_")
+    lines += [
+        f"{head} *{coin}/USDT {word} {fmt_pct(pct)}*",
+        "_variação nas últimas 24h_",
+        "",
+        f"💵 Preço: *US$ {fmt_price(price)}*",
+        f"{arrow} Variação: *{fmt_pct(pct)}*",
+    ]
+    if btc:
+        btc_price, btc_pct = btc
+        btc_dot = "🟢" if btc_pct >= 0 else "🔴"
+        lines += [
+            "",
+            "━━━━━━━━━━━━━━",
+            "₿ *BTC/USD* (mesmo período)",
+            f"💵 US$ {fmt_price(btc_price)}  {btc_dot} {fmt_pct(btc_pct)}",
+        ]
+    lines += ["", f"🕒 {now} (Brasília)"]
+    return "\n".join(lines)
+
+
+def fetch_btc():
+    try:
+        _, price, pct = fetch_ticker("BTCUSDT")
+        return price, pct
+    except Exception as e:  # alerta sai mesmo sem o BTC
+        print(e, file=sys.stderr)
+        return None
+
+
 def main():
     if os.environ.get("TESTE") == "true":
-        send_whatsapp("🔻 TESTE -10.00% em 24h\nPreço: US$ 1,2345\nMonitor: DOT, NEAR, ATOM, SUI, ONDO")
+        _, price, pct = fetch_ticker("NEARUSDT")
+        btc = fetch_btc()
+        send_whatsapp(build_message("NEARUSDT", price, pct, btc, teste=True))
+        send_whatsapp(build_message("DOTUSDT", 1.2345, -12.34, btc, teste=True))
         return
 
     state = load_state()
     levels = state.setdefault("levels", {})
     failures = 0
+    btc = None
 
     for symbol in SYMBOLS:
         try:
@@ -104,15 +169,10 @@ def main():
         deeper = level != 0 and (level > 0) == (current > 0) and abs(level) > abs(current)
 
         if new_direction or deeper:
-            emoji = "🚀" if pct > 0 else "🔻"
-            coin = symbol.replace("USDT", "")
-            msg = (
-                f"{emoji} {coin} {pct:+.2f}% em 24h\n"
-                f"Preço: US$ {price:,.4f}\n"
-                f"Fonte: {source}"
-            )
+            if btc is None:
+                btc = fetch_btc()
             try:
-                send_whatsapp(msg)
+                send_whatsapp(build_message(symbol, price, pct, btc))
             except Exception as e:  # não marca como alertado -> tenta de novo na próxima execução
                 print(f"{symbol}: falha ao enviar WhatsApp: {e}", file=sys.stderr)
                 failures += 1
