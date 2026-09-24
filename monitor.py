@@ -1,10 +1,11 @@
-"""Monitor de variação 24h de criptomoedas (Binance Futures) com alerta no WhatsApp via CallMeBot.
+"""Monitor de oscilação de criptomoedas na última hora (Binance Futures) com alerta no WhatsApp via CallMeBot.
 
 Regras de alerta (por moeda):
-- Alerta quando a variação 24h cruza +10% ou -10%.
-- Alerta de novo a cada novo degrau de 10% (20%, 30%...) na mesma direção.
-- Rearma quando a variação volta para dentro de ±REARM_PCT (evita alertas repetidos
-  quando o preço fica oscilando em torno de 10%).
+- Olha os candles de 1 minuto dos últimos 60 minutos e compara o preço atual com a mínima
+  (alta) e a máxima (queda) desse período — pega qualquer movimento de 5% em menos de 1 hora.
+- Alerta quando o movimento chega a +5% ou -5%.
+- Na mesma direção, só alerta de novo depois de COOLDOWN_MIN minutos ou se o movimento
+  chegar a um novo degrau de 5% (10%, 15%...). Direção oposta alerta na hora.
 """
 
 import json
@@ -18,16 +19,17 @@ from pathlib import Path
 
 # ===== Configuração =====
 SYMBOLS = ["DOTUSDT", "NEARUSDT", "ATOMUSDT", "SUIUSDT", "ONDOUSDT"]  # adicione/remova moedas aqui
-THRESHOLD_PCT = 10.0    # tamanho de cada degrau de alerta
-REARM_PCT = 8.0         # volta abaixo disso (em módulo) = rearma
+THRESHOLD_PCT = 5.0     # tamanho de cada degrau de alerta
+WINDOW_MIN = 60         # janela de observação (minutos)
+COOLDOWN_MIN = 60       # tempo mínimo entre alertas na mesma direção (salvo novo degrau)
 STATE_FILE = Path(__file__).parent / "state.json"
 BRT = timezone(timedelta(hours=-3))  # horário de Brasília
 
-PRICE_SOURCES = [
+KLINE_SOURCES = [
     # Binance Futures (perpétuo). Bloqueia IPs dos EUA (servidores do GitHub), por isso há fallback.
-    ("Binance Futures", "https://fapi.binance.com/fapi/v1/ticker/24hr?symbol={symbol}"),
+    ("Binance Futures", "https://fapi.binance.com/fapi/v1/klines?symbol={symbol}&interval=1m&limit={limit}"),
     # Mirror público de dados da Binance (spot) — funciona de qualquer lugar.
-    ("Binance Spot", "https://data-api.binance.vision/api/v3/ticker/24hr?symbol={symbol}"),
+    ("Binance Spot", "https://data-api.binance.vision/api/v3/klines?symbol={symbol}&interval=1m&limit={limit}"),
 ]
 
 
@@ -37,15 +39,41 @@ def http_get_json(url):
         return json.load(resp)
 
 
-def fetch_ticker(symbol):
+def fetch_candles(symbol):
+    """Candles de 1 min da última hora: [abertura, open, high, low, close, ...]."""
     errors = []
-    for name, url in PRICE_SOURCES:
+    for name, url in KLINE_SOURCES:
         try:
-            data = http_get_json(url.format(symbol=symbol))
-            return name, float(data["lastPrice"]), float(data["priceChangePercent"])
+            candles = http_get_json(url.format(symbol=symbol, limit=WINDOW_MIN))
+            if not candles:
+                raise ValueError("resposta vazia")
+            return name, candles
         except Exception as e:  # tenta a próxima fonte
             errors.append(f"{name}: {e}")
     raise RuntimeError(f"Falha ao buscar {symbol}: " + " | ".join(errors))
+
+
+def fetch_move(symbol):
+    """Maior movimento da última hora até o preço atual: alta desde a mínima ou queda desde a máxima."""
+    source, candles = fetch_candles(symbol)
+    price = float(candles[-1][4])
+    low = min(float(c[3]) for c in candles)
+    high = max(float(c[2]) for c in candles)
+    rise = (price - low) / low * 100
+    fall = (price - high) / high * 100
+    return source, price, (rise if rise >= -fall else fall)
+
+
+def fetch_btc():
+    """Preço do BTC e variação no mesmo período (agora vs. 1 hora atrás)."""
+    try:
+        _, candles = fetch_candles("BTCUSDT")
+        price = float(candles[-1][4])
+        start = float(candles[0][1])
+        return price, (price - start) / start * 100
+    except Exception as e:  # alerta sai mesmo sem o BTC
+        print(e, file=sys.stderr)
+        return None
 
 
 def send_whatsapp(text):
@@ -77,7 +105,7 @@ def save_state(state):
 
 
 def level_for(pct):
-    """Com degrau de 10%: +13% -> 1, -21% -> -2, +7% -> 0."""
+    """Com degrau de 5%: +6% -> 1, -11% -> -2, +3% -> 0."""
     steps = int(abs(pct) // THRESHOLD_PCT)
     return steps if pct >= 0 else -steps
 
@@ -105,7 +133,7 @@ def build_message(symbol, price, pct, btc):
     head, word = ("🚀🟢", "SUBIU") if pct >= 0 else ("🔻🔴", "CAIU")
     lines = [
         f"{head} *{coin}/USDT {word} {fmt_pct(pct)}*",
-        "Variação nas últimas 24h",
+        "Variação na última hora",
         f"💵 Preço: *US$ {fmt_price(price)}*",
     ]
     if btc:
@@ -122,44 +150,39 @@ def build_message(symbol, price, pct, btc):
     return "\n".join(lines)
 
 
-def fetch_btc():
-    try:
-        _, price, pct = fetch_ticker("BTCUSDT")
-        return price, pct
-    except Exception as e:  # alerta sai mesmo sem o BTC
-        print(e, file=sys.stderr)
-        return None
-
-
 def main():
     if os.environ.get("TESTE") == "true":  # dispara a mensagem de todas as moedas com dados reais
         btc = fetch_btc()
         for symbol in SYMBOLS:
-            _, price, pct = fetch_ticker(symbol)
+            _, price, pct = fetch_move(symbol)
             send_whatsapp(build_message(symbol, price, pct, btc))
         return
 
     state = load_state()
-    levels = state.setdefault("levels", {})
+    state.pop("levels", None)  # formato antigo (variação 24h)
+    alerts = state.setdefault("alerts", {})
+    now = int(time.time())
     failures = 0
     btc = None
 
     for symbol in SYMBOLS:
         try:
-            source, price, pct = fetch_ticker(symbol)
+            source, price, pct = fetch_move(symbol)
         except Exception as e:
             print(e, file=sys.stderr)
             failures += 1
             continue
 
-        current = levels.get(symbol, 0)
+        last = alerts.get(symbol)
+        expired = last is None or now - last["at"] >= COOLDOWN_MIN * 60
         level = level_for(pct)
-        print(f"{symbol}: {price} ({pct:+.2f}% 24h) via {source} | nível {level}, último alerta {current}")
+        print(f"{symbol}: {price} ({pct:+.2f}% em {WINDOW_MIN} min) via {source} | nível {level}, último alerta {last}")
 
-        new_direction = level != 0 and (current == 0 or (level > 0) != (current > 0))
-        deeper = level != 0 and (level > 0) == (current > 0) and abs(level) > abs(current)
-
-        if new_direction or deeper:
+        if level != 0 and (
+            expired
+            or (level > 0) != (last["level"] > 0)  # direção oposta
+            or abs(level) > abs(last["level"])     # novo degrau
+        ):
             if btc is None:
                 btc = fetch_btc()
             try:
@@ -168,10 +191,9 @@ def main():
                 print(f"{symbol}: falha ao enviar WhatsApp: {e}", file=sys.stderr)
                 failures += 1
                 continue
-            levels[symbol] = level
-        elif abs(pct) < REARM_PCT and current != 0:
-            print(f"{symbol}: voltou para dentro de ±{REARM_PCT}%, alerta rearmado.")
-            levels[symbol] = 0
+            alerts[symbol] = {"level": level, "at": now}
+        elif expired and last is not None:
+            del alerts[symbol]  # passou o cooldown sem novo movimento
 
     # Muda uma vez por mês -> gera um commit e impede o GitHub de desativar o agendamento por inatividade.
     state["keepalive"] = datetime.now(timezone.utc).strftime("%Y-%m")
