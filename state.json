@@ -1,9 +1,4 @@
 {
-  "alerts": {
-    "ONDOUSDT": {
-      "at": 1790264858,
-      "level": 1
-    }
-  },
+  "alerts": {},
   "keepalive": "2026-09"
 }
