@@ -1,9 +1,4 @@
 {
-  "alerts": {
-    "NEARUSDT": {
-      "at": 1790707357,
-      "level": 1
-    }
-  },
+  "alerts": {},
   "keepalive": "2026-09"
 }
